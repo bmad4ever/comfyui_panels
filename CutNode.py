@@ -7,6 +7,7 @@ from shapely.geometry.polygon import orient
 from shapely import affinity
 from PIL import Image, ImageDraw, ImageOps
 import matplotlib.pyplot as plt
+import random
 import math
 import copy
 
@@ -358,6 +359,17 @@ class CutNode:
 
         return out
 
+    @staticmethod
+    def gen_rand_node(rng: random.Random, max_cuts: int = 2, min_angle: int = -15, max_angle: int = 15):
+        vertical = rng.choice([True, False])
+        angle = rng.randint(min_angle, max_angle)
+        split_mode = rng.choice(list(SPLIT_MODES.keys()))
+        cuts = rng.randint(1, max_cuts) if split_mode == 0 else 1
+        node = CutNode(vertical, angle, split_mode)
+        for _ in range(cuts + 1):
+            node.add_child(None)
+        return node
+
 
 def layout_to_image(
     cut_tree: CutNode,
@@ -489,4 +501,3 @@ def draw_polygon_contours(
 
     img = ImageOps.flip(img)
     return img.resize((width, height), Image.Resampling.LANCZOS)
-

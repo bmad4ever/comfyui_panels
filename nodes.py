@@ -393,8 +393,9 @@ class RandomPanelLayoutGenerator:
         return {
             "required": {
                 "num_panels": ("INT", {"default": 5, "min": 2, "max": 32}),
-                "min_angle": ("INT", {"default": -30, "min": -45, "max": 45}),
-                "max_angle": ("INT", {"default": 30, "min": -45, "max": 45}),
+                "max_cuts": ("INT", {"default": 2, "min": 1, "max": 9}),
+                "min_angle": ("INT", {"default": -25, "min": -45, "max": 45}),
+                "max_angle": ("INT", {"default": 25, "min": -45, "max": 45}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True})
             }
         }
@@ -406,9 +407,10 @@ class RandomPanelLayoutGenerator:
 
     @staticmethod
     def random_cut_tree(
-            num_panels: int = 5,
-            angle_min: int = -45,
-            angle_max: int = 45,
+            num_panels: int,
+            max_cuts: int = 2,
+            min_angle: int = -15,
+            max_angle: int = 15,
             seed: Optional[int] = None
     ) -> Optional[CutNode]:
         """
@@ -421,43 +423,41 @@ class RandomPanelLayoutGenerator:
 
         rng = random.Random(seed)
 
-        # recursive builder
-        def build(panels_left: int) -> CutNode:
-            # choose random orientation
-            vertical = rng.choice([True, False])
-            # random angle
-            angle = rng.randint(angle_min, angle_max)
-            # random split mode
-            split_mode = rng.choice(list(SPLIT_MODES.keys()))
+        # 1st Generate nodes until we reach desired panel count
+        panels = 1
+        unused_nodes: list[CutNode] = []
+        while panels < num_panels:
+            remaining = num_panels - panels
+            max_possible_cuts = min(max_cuts, remaining)  # not -1, cause the cuts are nested within a prior panel
+            node = CutNode.gen_rand_node(rng, max_possible_cuts, min_angle, max_angle)
+            panels += node.cuts
+            unused_nodes.append(node)
 
-            # enforce cut count rules
-            cuts = rng.randint(1, 3) if split_mode == 0 else 1
+        if not unused_nodes:
+            return None
 
-            # create node
-            node = CutNode(vertical, angle, split_mode)
+        # Build hierarchy after all nodes have been generated
+        root = unused_nodes.pop(rng.randrange(len(unused_nodes)))
+        used_nodes_available = [root]
+        used_nodes_unavailable: list[CutNode] = []  # without empty children slots
 
-            # always creates 2 children
-            # decide how many panels to allocate to each branch
-            if panels_left <= 2:
-                # exactly 2 panels → both leaves
-                node.add_child(None)
-                node.add_child(None)
-                return node
+        while unused_nodes:
+            parent = rng.choice(used_nodes_available)
+            child_idx = rng.choice([i for i, c in enumerate(parent.children) if c is None])
+            node = unused_nodes.pop(rng.randrange(len(unused_nodes)))
+            parent.children[child_idx] = node
 
-            # randomly split the remaining panels
-            left_panels = rng.randint(1, panels_left - 1)
-            right_panels = panels_left - left_panels
+            # update availability
+            if all(c is not None for c in parent.children):
+                used_nodes_available.remove(parent)
+                used_nodes_unavailable.append(parent)
 
-            # recursively build children
-            node.add_child(build(left_panels) if left_panels > 1 else None)
-            node.add_child(build(right_panels) if right_panels > 1 else None)
+            used_nodes_available.append(node)
 
-            return node
+        return root
 
-        return build(num_panels)
-
-    def func(self, num_panels, min_angle, max_angle, seed):
-        cut_tree = self.random_cut_tree(num_panels, min_angle, max_angle, seed)
+    def func(self, num_panels, max_cuts, min_angle, max_angle, seed):
+        cut_tree = self.random_cut_tree(num_panels, max_cuts, min_angle, max_angle, seed)
         return (cut_tree,)
 
 
@@ -505,17 +505,23 @@ class MutatePanelLayout:
         rng = random.Random(seed)
 
         def _mutate_node(n: CutNode):
-            # 1) Add a child
-            if n.split_mode == 0 and rng.random() < prob_add:
-                insert_idx = rng.randint(0, len(n.children))
-                n.children.insert(insert_idx, None)
+            # 0) Recurse ( run from leafs to top to prevent endless operations )
+            for child in n.children:
+                if child is not None:
+                    _mutate_node(child)
 
-            # 2) Remove a child
-            if n.split_mode == 0 and n.cuts > 0 and rng.random() < prob_remove:
-                removable_indices = [i for i, c in enumerate(n.children) if c is not None or len(n.children) > 1]
-                if removable_indices:
-                    idx = rng.choice(removable_indices)
-                    n.children.pop(idx)
+            removable_indices = [i for i, c in enumerate(n.children) if c is not None
+                                 and rng.random() < prob_remove]  # roll for each individually
+            addable_indices = [i for i, c in enumerate(n.children) if c is None
+                               and rng.random() < prob_add]  # roll for each individually
+
+            # 1) Add a cut
+            for idx in addable_indices:
+                n.children[idx] = CutNode.gen_rand_node(rng, 2, -max_angle_delta, max_angle_delta)
+
+            # 2) Remove a cut (non None child)
+            for idx in removable_indices:
+                n.children[idx] = None
 
             # 3) Change number of cuts
             if n.split_mode == 0 and rng.random() < prob_change_cuts:
@@ -544,11 +550,6 @@ class MutatePanelLayout:
                     # ensure children are compatible: non-midpoint → only 1 cut
                     if n.split_mode != 0 and len(n.children) > 2:
                         n.children = n.children[:2]
-
-            # 6) Recurse
-            for child in n.children:
-                if child is not None:
-                    _mutate_node(child)
 
         _mutate_node(node)
         return node
