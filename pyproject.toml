@@ -1,0 +1,14 @@
+[project]
+name = "comfyui_panels"
+description = "Comics/Manga like panel layouts."
+version = "1.0.0"
+license = { file = "LICENSE" }
+dependencies = ["shapely==2.1.1", "matplotlib==3.10.6"]
+
+[project.urls]
+Repository = "https://github.com/bmad4ever/comfyui-panels"
+
+[tool.comfy]
+PublisherId = "bmad4ever"
+DisplayName = "comfyui-panels"
+Icon = ""
