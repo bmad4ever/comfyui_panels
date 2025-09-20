@@ -29,6 +29,20 @@ class IO_Types:
     BBOX_SNAP = "BBOX_SNAP"
 
 
+def unwrap_bbox_as_ints(bbox, container_tensor=None) -> tuple[int, int, int, int]:
+    """
+    :param bbox: tuple w/ 4 floats ( as returned by polygon.bounds )
+    :param container_tensor: image or mask comfy tensor. Constrains the output to be within this container bounds.
+    """
+    x0, y0, x1, y1 = bbox
+    x0, y0 = round(x0), round(y0)   # TODO consider changing to floor and ceil on the next line
+    x1, y1 = round(x1), round(y1)
+    if container_tensor is not None:
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(container_tensor.shape[2], x1), min(container_tensor.shape[1], y1)
+    return x0, y0, x1, y1
+
+
 # region Core Nodes
 
 class LoadPanelLayout:
@@ -991,7 +1005,7 @@ class BBoxFromInts:
     CATEGORY = CATEGORY_PATH
 
     def func(self, xmin, ymin, xmax, ymax):
-        return ((int(xmin), int(ymin), int(xmax), int(ymax)),)
+        return ((float(xmin), float(ymin), float(xmax), float(ymax)),)
 
 
 class PasteCrops:
@@ -1020,7 +1034,7 @@ class PasteCrops:
         base = base_image[0].clone()  # (1, H, W, C)
 
         for crop, mask, bbox in zip(cropped_images, masks, bboxes):
-            x0, y0, x1, y1 = bbox
+            x0, y0, x1, y1 = unwrap_bbox_as_ints(bbox, base)
             w, h = x1 - x0, y1 - y0
 
             # Ensure mask has channel dimension
@@ -1052,9 +1066,166 @@ class PasteCrops:
 
         return (base,)
 
+
+class PolygonToResizedMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "polygon": ("POLYGON",),
+                "approx_res": (["262144", "1048576", "1638400"], {"default": "1048576"}),
+                "pad": (["16", "32", "64", "128"], {"default": "64"}),
+            },
+            "optional": {
+                "image": ("IMAGE",),  # optional image to crop + resize
+            }
+        }
+
+    RETURN_TYPES = ("MASK", "BBOX", "IMAGE")
+    # RETURN_NAMES = ("mask", "bbox", "image")
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    def func(self, polygon, approx_res, pad, image=None):
+        approx_res = int(approx_res)
+        pad = int(pad)
+
+        # 1. Get bounds and round outward
+        minx, miny, maxx, maxy = polygon.bounds
+        minx, miny = math.floor(minx), math.floor(miny)
+        maxx, maxy = math.ceil(maxx), math.ceil(maxy)
+
+        width = maxx - minx
+        height = maxy - miny
+
+        if width <= 0 or height <= 0:
+            empty_mask = torch.zeros((1, pad, pad), dtype=torch.float32)
+            empty_img = None if image is None else torch.zeros((1, pad, pad, image.shape[-1]), dtype=image.dtype)
+            return (empty_mask, (0, 0, 0, 0), empty_img)
+
+        # 2. Rasterize polygon mask
+        mask_img = Image.new("L", (width, height), 0)
+        shifted_poly = translate(polygon, xoff=-minx, yoff=-miny)
+        draw = ImageDraw.Draw(mask_img)
+        draw.polygon(list(shifted_poly.exterior.coords), outline=1, fill=1)
+
+        mask_np = np.array(mask_img, dtype=np.float32)  # HxW in {0,1}
+        mask_t = torch.from_numpy(mask_np).unsqueeze(0)  # [1,H,W]
+
+        # 3. Determine scaling factor from largest dimension
+        H, W = mask_np.shape
+        largest_dim = max(H, W)
+
+        ideal_scale = math.sqrt(approx_res / (H * W))
+        scaled_largest = int(largest_dim * ideal_scale)
+
+        snapped_largest = max(pad, (scaled_largest // pad) * pad)
+        scale = snapped_largest / largest_dim
+
+        new_H = max(1, int(H * scale))
+        new_W = max(1, int(W * scale))
+
+        # 4. Resize mask
+        mask_resized = F.interpolate(
+            mask_t.unsqueeze(1), size=(new_H, new_W), mode="bilinear", align_corners=False
+        ).squeeze(1)  # [1,H,W]
+
+        # 5. Pad smaller dimension to multiple of pad (centered)
+        pad_H = math.ceil(new_H / pad) * pad
+        pad_W = math.ceil(new_W / pad) * pad
+
+        pad_top = (pad_H - new_H) // 2
+        pad_bottom = pad_H - new_H - pad_top
+        pad_left = (pad_W - new_W) // 2
+        pad_right = pad_W - new_W - pad_left
+
+        mask_padded = F.pad(mask_resized, (pad_left, pad_right, pad_top, pad_bottom), value=0)
+
+        # 6. Crop + resize + pad image if provided
+        img_out = None
+        if image is not None:
+            # crop the image to polygon bounds
+            img_crop = image[:, miny:maxy, minx:maxx, :]  # [B,h,w,C]
+
+            # resize with same factor
+            img_resized = F.interpolate(
+                img_crop.permute(0, 3, 1, 2), size=(new_H, new_W), mode="bilinear", align_corners=False
+            ).permute(0, 2, 3, 1)  # [B,new_H,new_W,C]
+
+            # pad to match mask
+            img_out = F.pad(img_resized, (0, 0, pad_left, pad_right, pad_top, pad_bottom))
+
+        # 7. Recompute bbox on nonzero mask
+        nz = (mask_padded[0] > 0.5).nonzero(as_tuple=False)
+        if nz.shape[0] > 0:
+            ymin, xmin = nz.min(dim=0)[0].tolist()
+            ymax, xmax = nz.max(dim=0)[0].tolist()
+            bbox = (float(xmin), float(ymin), float(xmax), float(ymax))
+        else:
+            bbox = (0.0, 0.0, 0.0, 0.0)
+
+        return (mask_padded, bbox, img_out)
+
+
+class UnpackBBox:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "bbox": (IO_Types.BBOX,),
+            }
+        }
+
+    RETURN_TYPES = ("INT", "INT", "INT", "INT")
+    FUNCTION = "apply"
+    CATEGORY = CATEGORY_PATH
+
+    def apply(self, bbox):
+        xmin, ymin, xmax, ymax = unwrap_bbox_as_ints(bbox)
+        return (xmin, ymin, xmax, ymax)
+
+
+class CropMaskByBBox:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "bbox": (IO_Types.BBOX,),   # (xmin, ymin, xmax, ymax)
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "apply"
+    CATEGORY = CATEGORY_PATH
+
+    def apply(self, mask, bbox):
+        xmin, ymin, xmax, ymax = unwrap_bbox_as_ints(bbox, mask)
+        cropped = mask[:, ymin:ymax, xmin:xmax].clone()
+        return (cropped,)
+
+
+class CropImageByBBox:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "bbox": (IO_Types.BBOX,),   # (xmin, ymin, xmax, ymax)
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "apply"
+    CATEGORY = CATEGORY_PATH
+
+    def apply(self, image, bbox):
+        xmin, ymin, xmax, ymax = unwrap_bbox_as_ints(bbox, image)
+        cropped = image[:, ymin:ymax, xmin:xmax, :].clone()
+        return (cropped,)
+
+
 # endregion Other Nodes
-
-
 
 
 NODE_CLASS_MAPPINGS = {
@@ -1085,10 +1256,16 @@ NODE_CLASS_MAPPINGS = {
     "bmad_PolygonUnwrappedBounds": PolygonUnwrappedBounds,
     "bmad_PasteCrops": PasteCrops,
     "bmad_BBoxFromInts": BBoxFromInts,
+    "bmad_UnpackBBox": UnpackBBox,
+    "bmad_CropMaskByBBox": CropMaskByBBox,
+
+    "bmad_CropImageByBBox": CropImageByBBox,
 
     "bmad_SliceList_Panels": SliceListPanel,
     "bmad_ListTransferPanel": ListTransferPanel,
     "bmad_ListAppendPanel": ListAppendPanel,
+
+    "bmad_PolygonToResizedMask": PolygonToResizedMask,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -1121,8 +1298,14 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_PolygonUnwrappedBounds": "Polygon.bounds (unwrapped)",
     "bmad_PasteCrops": "Paste Crops with Masks",
     "bmad_BBoxFromInts": "BBox from Ints",
+    "bmad_UnpackBBox": "Unpack BBox",
+    "bmad_CropMaskByBBox": "Crop Mask By BBox",
+
+    "bmad_CropImageByBBox": "Crop Image By BBox",
 
     "bmad_SliceList_Panels": "Slice Panels List",
     "bmad_ListTransferPanel": "List Transfer Panels",
     "bmad_ListAppendPanel": "List Append Panels",
+
+    "bmad_PolygonToResizedMask": "Polygon To Resized Mask",
 }
