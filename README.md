@@ -2,9 +2,10 @@
 
 This packages contains nodes for generating and-or organizing comics-manga like panels, such as the ones below (_images have the workflow embedded_).
 
+<span>
 <img src="./workflows/Barebones Board Generation.png" alt="drawing" style="width:225px;"/>
 <img src="./workflows/Character Over Panels.png" alt="drawing" style="width:225px;"/>
-
+</span>
 
 ## Panel Layouts
 
@@ -52,7 +53,7 @@ These panels can be modified using the following nodes:
 - **Bevel Polygon**  
 - **Offset Polygon Bounds**
 
-<img src="./workflows/Preview Panels.png" alt="Panel preview example" style="width:450px;"/>
+<img src="./workflows/Preview Panels.png" alt="Panel preview example" style="width:700px;"/>
 
 Once a polygon is adjusted as desired, you can convert it into a mask using one of these nodes:  
 - **Panel to Mask**  
