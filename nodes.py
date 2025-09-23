@@ -17,6 +17,7 @@ import node_helpers
 
 from .CutNode import *
 from .aux_data import *
+from .draw_funcs import draw_polygons_contours_line, draw_polygons_contours_dashed, draw_polygons_contours_dotted
 
 CATEGORY_PATH = "Bmad/Panels"
 META_DATA_KEY = "cut_tree"
@@ -41,6 +42,39 @@ def unwrap_bbox_as_ints(bbox, container_tensor=None) -> tuple[int, int, int, int
         x0, y0 = max(0, x0), max(0, y0)
         x1, y1 = min(container_tensor.shape[2], x1), min(container_tensor.shape[1], y1)
     return x0, y0, x1, y1
+
+
+def _parse_color_input(color_input: str | int | tuple[int, int, int], alpha: int) -> tuple[int, int, int, int]:
+    """
+    :param color_input: hexadecimal string, integer, or integer tuple
+    :param alpha: expected to be in the 0 to 255 range
+    """
+    if isinstance(color_input, str):
+        color_input = int(color_input.lstrip("#"), 16)
+    if isinstance(color_input, int):
+        color = ((color_input & 0xFF0000) >> 16,
+                 (color_input & 0x00FF00) >> 8,
+                 (color_input & 0x0000FF),
+                 alpha)
+    else:  # suppose the following without checking -> isinstance(color_input, tuple) and len(x) == 3
+        color = (color_input[0], color_input[1], color_input[2], alpha)
+    return color
+
+
+def _RGBA2tensors(img: Image.Image) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    :return: (image tensor, mask tensor)
+    """
+    i = node_helpers.pillow(ImageOps.exif_transpose, img)
+    if i.mode == 'I':
+        i = i.point(lambda p: p * (1 / 255))
+    image = i
+    image = np.array(image).astype(np.float32) / 255.0
+    image = torch.from_numpy(image)[None,]
+    mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
+    mask = torch.from_numpy(mask)
+    return image, mask
+
 
 
 # region Core Nodes
@@ -584,7 +618,7 @@ class OffsetPolygonBounds:
         return {
             "required": {
                 "polygon": (IO_Types.PANEL,),
-                "offset": ("FLOAT", {"default": 32, "min": -1000, "max": 1000, "step": 0.5, "tooltip":
+                "offset": ("FLOAT", {"default": -32, "min": -1000, "max": 1000, "step": 0.5, "tooltip":
                     "The distance (in pixels) to offset the polygons' edges"})
             },
             "optional": {
@@ -893,14 +927,11 @@ class DrawPanelsEdges:
             "required": {
                 "panels": (IO_Types.PANEL,),
                 "canvas": (IO_Types.PANEL,),
-                "stroke_width": ("INT", {"default": 8, "min": 1, "max": 512}),
+                "stroke_width": ("FLOAT", {"default": 8, "min": 1, "max": 256, "step": .5}),
                 "color_alpha": ("INT", {"default": 255, "min": 1, "max": 255}),
                 "stroke_color": ("COLOR", {"default": "#000000"}),  # requires bmad or mtb nodes
                 "upscale": ("INT", {"default": 4, "min": 1, "max": 8, "tooltip":
                     "The lines are drawn upscaled by this factor to anti-alias the jaggies away."}),
-                #"pad": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "Safety margin. Use this when some "
-                #    "edge falls outside of the provided canvas."}),
-                # TODO is pad really needed? may need to review the code...
             },
         }
 
@@ -916,30 +947,93 @@ class DrawPanelsEdges:
         color_alpha = color_alpha[0]
         upscale = upscale[0]
 
-        # prepare Color input
-        if isinstance(stroke_color, str):
-            stroke_color = int(stroke_color.lstrip("#"), 16)
-        if isinstance(stroke_color, int):
-            color = ((stroke_color & 0xFF0000) >> 16,
-                     (stroke_color & 0x00FF00) >> 8,
-                     (stroke_color & 0x0000FF),
-                     color_alpha)
-        else:  # suppose the following without checking -> isinstance(stroke_color, tuple) and len(x) == 3
-            color = (stroke_color[0], stroke_color[1], stroke_color[2], color_alpha)
+        color = _parse_color_input(stroke_color, color_alpha)
+        img = draw_polygons_contours_line(
+            panels, canvas, stroke_color=color, stroke_width=stroke_width, upscale=upscale)
+        image, mask = _RGBA2tensors(img)
+        return (image, mask)
 
-        img = draw_polygon_contours(panels, canvas, stroke_color=color, stroke_width=stroke_width,
-                                    pad=0, upscale=upscale)
 
-        i = node_helpers.pillow(ImageOps.exif_transpose, img)
-        if i.mode == 'I':
-            i = i.point(lambda p: p * (1 / 255))
-        image = i
+class DrawPanelsEdgesDashed:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "panels": (IO_Types.PANEL,),
+                "canvas": (IO_Types.PANEL,),
+                "stroke_width": ("FLOAT", {"default": 8, "min": 1, "max": 256, "step": .5}),
+                "dash_length": ("FLOAT", {"default": 24, "min": 1, "max": 256, "step": .5}),
+                "gap_length": ("FLOAT", {"default": 16, "min": 1, "max": 256, "step": .5}),
+                "color_alpha": ("INT", {"default": 255, "min": 1, "max": 255}),
+                "stroke_color": ("COLOR", {"default": "#000000"}),  # requires bmad or mtb nodes
+                "upscale": ("INT", {"default": 4, "min": 1, "max": 8, "tooltip":
+                    "The lines are drawn upscaled by this factor to anti-alias the jaggies away."}),
+            },
+        }
 
-        image = np.array(image).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)[None,]
-        mask = np.array(i.getchannel('A')).astype(np.float32) / 255.0
-        mask = torch.from_numpy(mask)
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "func"
+    INPUT_IS_LIST = True
+    CATEGORY = CATEGORY_PATH
 
+    DESCRIPTION = ("The dashes parameters, namely the dash and gap lengths, are adjusted to a value near the specified "
+                   "to keep the dashes evenly spaced when closing the loop.")
+
+    def func(self, panels, canvas, stroke_width, dash_length, gap_length, stroke_color, color_alpha, upscale):
+        canvas = canvas[0]
+        stroke_width = stroke_width[0]
+        stroke_color = stroke_color[0]
+        color_alpha = color_alpha[0]
+        upscale = upscale[0]
+        dash_length = dash_length[0]
+        gap_length = gap_length[0]
+
+        color = _parse_color_input(stroke_color, color_alpha)
+        img = draw_polygons_contours_dashed(
+            panels, canvas,
+            stroke_color=color, stroke_width=stroke_width,
+            dash_length=dash_length, gap_length=gap_length, upscale=upscale)
+        image, mask = _RGBA2tensors(img)
+        return (image, mask)
+
+
+class DrawPanelsEdgesDotted:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "panels": (IO_Types.PANEL,),
+                "canvas": (IO_Types.PANEL,),
+                "dot_radius": ("FLOAT", {"default": 8, "min": 1, "max": 256, "step": .5}),
+                "dot_spacing": ("FLOAT", {"default": 32, "min": 1, "max": 256, "step": .5}),
+                "color_alpha": ("INT", {"default": 255, "min": 1, "max": 255}),
+                "stroke_color": ("COLOR", {"default": "#000000"}),  # requires bmad or mtb nodes
+                "upscale": ("INT", {"default": 4, "min": 1, "max": 8, "tooltip":
+                    "The lines are drawn upscaled by this factor to anti-alias the jaggies away."}),
+            },
+        }
+
+    RETURN_TYPES = ("IMAGE", "MASK")
+    FUNCTION = "func"
+    INPUT_IS_LIST = True
+    CATEGORY = CATEGORY_PATH
+
+    DESCRIPTION = ("The dot spacing is adjusted to a value near the specified "
+                   "to keep dots evenly spaced when closing the loop.")
+
+    def func(self, panels, canvas, dot_radius, dot_spacing, stroke_color, color_alpha, upscale):
+        canvas = canvas[0]
+        dot_radius = dot_radius[0]
+        dot_spacing = dot_spacing[0]
+        stroke_color = stroke_color[0]
+        color_alpha = color_alpha[0]
+        upscale = upscale[0]
+
+        color = _parse_color_input(stroke_color, color_alpha)
+        img = draw_polygons_contours_dotted(
+            panels, canvas, stroke_color=color,
+            dot_radius=dot_radius, dot_spacing=dot_spacing, upscale=upscale)
+        image, mask = _RGBA2tensors(img)
         return (image, mask)
 
 
@@ -1242,6 +1336,9 @@ NODE_CLASS_MAPPINGS = {
 
     "bmad_Panel2Mask": Panel2Mask,
     "bmad_DrawPanelsEdges": DrawPanelsEdges,
+    "bmad_DrawPanelsEdgesDashed": DrawPanelsEdgesDashed,
+    "bmad_DrawPanelsEdgesDotted": DrawPanelsEdgesDotted,
+
     "bmad_RotatePolygon": RotatePolygon,
     "bmad_ScalePolygon": ScalePolygon,
     "bmad_TranslatePolygon": TranslatePolygon,
@@ -1284,6 +1381,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     "bmad_Panel2Mask": "Panel to Mask",
     "bmad_DrawPanelsEdges": "Draw Panels Edges",
+    "bmad_DrawPanelsEdgesDashed": "Draw Panels Edges Dashed",
+    "bmad_DrawPanelsEdgesDotted": "Draw Panels Edges Dotted",
+
     "bmad_RotatePolygon": "Rotate Polygon",
     "bmad_ScalePolygon": "Scale Polygon",
     "bmad_TranslatePolygon": "Translate Polygon",
