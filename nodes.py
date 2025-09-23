@@ -283,10 +283,9 @@ class Panel2Mask:
         draw.polygon(coords, fill=1, outline=1)
 
         # Convert to torch tensor (1, H, W)
-        arr = np.array(img, dtype=np.uint8)
+        arr = np.array(img, dtype=np.float32)
         tensor = torch.from_numpy(arr).unsqueeze(0)
-        print(f"tensor dim for mask {tensor.shape}")
-        return torch.from_numpy(arr).unsqueeze(0)
+        return (tensor,)
 
 
 class PreviewPanelLayout(SavePanelLayout):
