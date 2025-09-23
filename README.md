@@ -5,6 +5,7 @@ This packages contains nodes for generating and-or organizing comics-manga like 
 <span>
 <img src="./workflows/Barebones Board Generation.png" alt="drawing" style="width:225px;"/>
 <img src="./workflows/Character Over Panels.png" alt="drawing" style="width:225px;"/>
+<img src="./workflows/Panels Over Image.png" alt="drawing" style="width:225px;"/>
 </span>
 
 ## Panel Layouts
