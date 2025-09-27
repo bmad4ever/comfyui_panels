@@ -829,7 +829,7 @@ def str_to_slice(slice_str):
     else:
         # Single index case, e.g. [3]
         sl = int(slice_str)
-        sl = slice(*[sl, sl + 1])
+        sl = slice(sl, None if sl == -1 else sl + 1)
 
     return sl
 
