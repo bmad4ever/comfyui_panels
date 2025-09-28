@@ -1321,6 +1321,64 @@ class CropImageByBBox:
 # endregion Other Nodes
 
 
+from .MangaPanelExtractor import MangaPanelExtractor
+
+
+class DetectPanelsInImage:
+
+    SIMPLIFICATION_METHODS = ["none", "bounding_box", "max_area_combination"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+                "threshold": ("INT", {"default": 240, "min": 1, "max": 254, "tooltip":
+                    "binary threshold when analysing the image"}),
+                "min_rel_area": ("FLOAT", {"default": .025, "min": .001, "max": .999, "step": .001, "tooltip":
+                    "contours with an area percentage with respect to the image size inferior to this value are discarded"}),
+                "simplify": (cls.SIMPLIFICATION_METHODS, {"default": cls.SIMPLIFICATION_METHODS[0], "tooltip":
+                    "Simplify the final polygons according to the provided criteria."}),
+
+                # the below args are subject to being discarded/omitted in the future
+                "max_vertices": ("INT", {"default": 6, "min": 3, "max": 9, "tooltip":
+                    "Simplify contour shapes with higher vertex count when analysing the contours.\n"
+                    "For most use cases use the default value."}),
+                "recover_non_convex": ("BOOLEAN", {"default": True, "tooltip":
+                    "If set to False, discards non convex shapes when detecting the contours.\n"
+                    "For most use cases use the default value."})
+            },
+        }
+
+    CATEGORY = CATEGORY_PATH
+    RETURN_TYPES = (IO_Types.PANEL,)
+    OUTPUT_IS_LIST = (True,)
+    OUTPUT_TOOLTIPS = ("Panels (Shapely Polygons)",)
+    FUNCTION = "func"
+    DESCRIPTION = ("'Simple' CV algo to generate panel layout from an image.\n"
+                   "You can build a custom layout using an image as input to this node.\n"
+                   "Paint the background white and the panels black.\n"
+                   "It can also be used directly over simple comic or manga pages, "
+                   "whose panel delimitation is very explicit.")
+
+    def func(self, image, threshold, min_rel_area, simplify, max_vertices, recover_non_convex):
+        cv_img = (image[0].cpu().numpy()[..., ::-1] * 255).astype(np.uint8)
+        extractor = MangaPanelExtractor(
+            threshold_value=threshold,
+            min_rel_panel_area=min_rel_area,
+            expansion_pixels=50,
+            max_vertices=max_vertices
+        )
+        results = extractor.extract_panels(cv_img)
+        if recover_non_convex and results['non_convex_shapes']:
+            print(f"Attempting to recover {len(results['non_convex_shapes'])} non-convex shapes...")
+            results = extractor.analyze_nonconvex_recovery(results)
+        if simplify != "none":
+            extractor.simplify_panels(results, simplify)
+        panels = [panel["polygon"] for panel in results["panels"]]
+        return (panels,)
+
+
 NODE_CLASS_MAPPINGS = {
     "bmad_CanvasPanel": CanvasPanel,
     "bmad_LoadPanelLayout": LoadPanelLayout,
@@ -1347,6 +1405,7 @@ NODE_CLASS_MAPPINGS = {
     "bmad_RandomPanelLayoutGenerator": RandomPanelLayoutGenerator,
     "bmad_GridPanelLayoutGenerator": GridPanelLayoutGenerator,
     "bmad_MutatePanelLayout": MutatePanelLayout,
+    "bmad_DetectPanelsInImage" : DetectPanelsInImage,
 
     "bmad_PolygonBounds": PolygonBounds,
     "bmad_PolygonUnwrappedBounds": PolygonUnwrappedBounds,
@@ -1392,6 +1451,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_RandomPanelLayoutGenerator": "Random Panel Layout Generator",
     "bmad_GridPanelLayoutGenerator": "Grid Panel Layout Generator",
     "bmad_MutatePanelLayout": "Mutate Panel Layout",
+    "bmad_DetectPanelsInImage": "Detect Panels In Image",
 
     "bmad_PolygonBounds": "Polygon.bounds",
     "bmad_PolygonUnwrappedBounds": "Polygon.bounds (unwrapped)",
