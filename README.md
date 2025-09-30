@@ -56,13 +56,20 @@ These panels can be modified using the following nodes:
 
 <img src="./workflows/Preview Panels.png" alt="Panel preview example" style="width:700px;"/>
 
+Alternatively, panels can be extracted from images using the **Detect Panels In Image** node. This node uses a basic computer vision algorithm that performs best on blank images with black shapes representing the panels. However, clean and simple panel layouts from comics or manga can also be used effectively as input.
+
+<img src="./workflows/Custom Panel Layout from Mask like Image.png" alt="Panel preview example" style="width:700px;"/>
+<img src="./workflows/Manga Panel Extration Example A.png" alt="Panel preview example" style="width:700px;"/>
+
 Once a polygon is adjusted as desired, you can convert it into a mask using one of these nodes:  
 - **Panel to Mask**  
 - **Polygon To Resized Mask** (recommended when used with the **Paste Crops with Masks** node)  
 
 To better understand the differences and potential uses of these nodes, refer to the example [workflows](workflows).
 
-Using the **Draw Panels Edges** node, you can generate an image with panel outlines to clearly separate them from the rest of the page content.
+You can use the **Draw Panels Edges** node to generate an image with the panels' outlines, which you can use to have clear visual separation between the panels and the rest of the page. Additionally, there are nodes available that create panel borders using dashed or dotted lines instead of solid strokes.
+
+<img src="./workflows/Panel Edges Draw Variants.png" alt="Panel preview example" style="width:700px;"/>
 
 As you may have noticed, panels are sometimes referred to as "polygons" in the node names and outputs.  
 This dual naming, though potentially confusing, is intentional: nodes and outputs using the "polygon" nomenclature are designed for broader compatibility with other packages that may also use `shapely.Polygon` objects.
