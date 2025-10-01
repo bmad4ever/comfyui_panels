@@ -1,4 +1,4 @@
-from shapely.affinity import rotate, scale, translate
+from shapely.affinity import rotate, scale, translate, skew
 from shapely.geometry import box  # , Polygon
 from PIL.PngImagePlugin import PngInfo
 import torch.nn.functional as F
@@ -15,6 +15,7 @@ from nodes import LoadImage
 import folder_paths
 import node_helpers
 
+from .MangaPanelExtractor import MangaPanelExtractor
 from .CutNode import *
 from .aux_data import *
 from .draw_funcs import draw_polygons_contours_line, draw_polygons_contours_dashed, draw_polygons_contours_dotted
@@ -28,6 +29,7 @@ class IO_Types:
     PANEL = "POLYGON"  # The layout panels. using original type to potentially re-use in or interface w/ other packages
     BBOX = "BBOX"
     BBOX_SNAP = "BBOX_SNAP"
+    POLY_3O = "POLY_3O"  # POLYGON OPERATION ORIGIN OPTION
 
 
 def unwrap_bbox_as_ints(bbox, container_tensor=None) -> tuple[int, int, int, int]:
@@ -75,6 +77,9 @@ def _RGBA2tensors(img: Image.Image) -> tuple[torch.Tensor, torch.Tensor]:
     mask = torch.from_numpy(mask)
     return image, mask
 
+
+def _get_poly_vert(poly: Polygon, index: int):
+    return poly.exterior.coords[index]
 
 
 # region Core Nodes
@@ -727,7 +732,10 @@ class RotatePolygon:
             "required": {
                 "polygon": (IO_Types.PANEL,),
                 "angle": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0}),
-                "origin": ("STRING", {"default": "center"}),  # "center", "centroid", or (x,y)
+            },
+            "optional": {
+                "origin": (IO_Types.POLY_3O, {"tooltip": "The origin point used for the operation.\n"
+                                                         "If none provided, the 'center' option is used."})
             }
         }
 
@@ -735,7 +743,10 @@ class RotatePolygon:
     FUNCTION = "func"
     CATEGORY = CATEGORY_PATH
 
-    def func(self, polygon, angle, origin):
+    def func(self, polygon, angle, origin="center"):
+        if isinstance(origin, int):  # vert index case
+            origin = _get_poly_vert(polygon, origin)
+
         new_poly = rotate(polygon, angle, origin=origin)
         return (new_poly,)
 
@@ -748,7 +759,10 @@ class ScalePolygon:
                 "polygon": (IO_Types.PANEL,),
                 "xfact": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": .001}),
                 "yfact": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": .001}),
-                "origin": ("STRING", {"default": "center"}),
+            },
+            "optional": {
+                "origin": (IO_Types.POLY_3O, {"tooltip": "The origin point used for the operation.\n"
+                                                         "If none provided, the 'center' option is used."})
             }
         }
 
@@ -756,7 +770,10 @@ class ScalePolygon:
     FUNCTION = "func"
     CATEGORY = CATEGORY_PATH
 
-    def func(self, polygon, xfact, yfact, origin):
+    def func(self, polygon, xfact, yfact, origin="center"):
+        if isinstance(origin, int):  # vert index case
+            origin = _get_poly_vert(polygon, origin)
+
         new_poly = scale(polygon, xfact=xfact, yfact=yfact, origin=origin)
         return (new_poly,)
 
@@ -767,8 +784,8 @@ class TranslatePolygon:
         return {
             "required": {
                 "polygon": (IO_Types.PANEL,),
-                "xoff": ("FLOAT", {"default": 0.0, "min": -1000.0, "max": 1000.0}),
-                "yoff": ("FLOAT", {"default": 0.0, "min": -1000.0, "max": 1000.0}),
+                "xoff": ("FLOAT", {"default": 0.0, "min": -4096.0, "max": 4096.0}),
+                "yoff": ("FLOAT", {"default": 0.0, "min": -4096.0, "max": 4096.0}),
             }
         }
 
@@ -812,6 +829,80 @@ class BevelPolygon:
                     return p
                 p = max(polys, key=lambda g: g.area)
         return (p,)
+
+
+class SkewPolygon:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "polygon": (IO_Types.PANEL,),
+                "xs": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0}),
+                "ys": ("FLOAT", {"default": 0.0, "min": -360.0, "max": 360.0}),
+            },
+            "optional": {
+                "origin": (IO_Types.POLY_3O, {"tooltip": "The origin point used for the operation.\n"
+                                                         "If none provided, the 'center' option is used."})
+            }
+        }
+
+    RETURN_TYPES = (IO_Types.PANEL,)
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    def func(self, polygon, xs, ys, origin="center"):
+        if isinstance(origin, int):  # vert index case
+            origin = _get_poly_vert(polygon, origin)
+
+        new_poly = skew(polygon, xs, ys, origin=origin)
+        return (new_poly,)
+
+
+class PolygonOrigin:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {}
+
+    RETURN_TYPES = (IO_Types.POLY_3O,)
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+
+class PolygonOriginVector(PolygonOrigin):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "x": ("FLOAT", {"default": 0.0}),
+                "y": ("FLOAT", {"default": 0.0}),
+            }
+        }
+
+    def func(self, x, y):
+        return ((x, y),)
+
+
+class PolygonOriginCenter(PolygonOrigin):
+    def func(self, ):
+        return ("center",)
+
+
+class PolygonOriginCentroid(PolygonOrigin):
+    def func(self, ):
+        return ("centroid",)
+
+
+class PolygonOriginVertex(PolygonOrigin):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "idx": ("INT", {"default": 0, "min": 0, "tooltip": "Vertex index in the polygon.exterior.coords."}),
+            }
+        }
+
+    def func(self, idx):
+        return (idx,)
 
 # endregion  Polygon Operations
 
@@ -1318,12 +1409,6 @@ class CropImageByBBox:
         return (cropped,)
 
 
-# endregion Other Nodes
-
-
-from .MangaPanelExtractor import MangaPanelExtractor
-
-
 class DetectPanelsInImage:
 
     SIMPLIFICATION_METHODS = ["none", "bounding_box", "max_area_combination"]
@@ -1378,6 +1463,8 @@ class DetectPanelsInImage:
         panels = [panel["polygon"] for panel in results["panels"]]
         return (panels,)
 
+# endregion Other Nodes
+
 
 NODE_CLASS_MAPPINGS = {
     "bmad_CanvasPanel": CanvasPanel,
@@ -1400,6 +1487,12 @@ NODE_CLASS_MAPPINGS = {
     "bmad_ScalePolygon": ScalePolygon,
     "bmad_TranslatePolygon": TranslatePolygon,
     "bmad_BevelPolygon": BevelPolygon,
+    "bmad_SkewPolygon": SkewPolygon,
+
+    "bmad_PolygonOriginVector": PolygonOriginVector,
+    "bmad_PolygonOriginCenter": PolygonOriginCenter,
+    "bmad_PolygonOriginCentroid": PolygonOriginCentroid,
+    "bmad_PolygonOriginVertex": PolygonOriginVertex,
 
     "bmad_BuildLayoutPanels": BuildLayoutPanels,
     "bmad_RandomPanelLayoutGenerator": RandomPanelLayoutGenerator,
@@ -1446,6 +1539,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_ScalePolygon": "Scale Polygon",
     "bmad_TranslatePolygon": "Translate Polygon",
     "bmad_BevelPolygon": "Bevel Polygon",
+    "bmad_SkewPolygon": "Skew Polygon",
+
+    "bmad_PolygonOriginVector": "Polygon Origin at Point",
+    "bmad_PolygonOriginCenter": "Polygon Origin at Center",
+    "bmad_PolygonOriginCentroid": "Polygon Origin at Centroid",
+    "bmad_PolygonOriginVertex": "Polygon Origin at Vertex",
 
     "bmad_BuildLayoutPanels": "Build Layout Panels",
     "bmad_RandomPanelLayoutGenerator": "Random Panel Layout Generator",
