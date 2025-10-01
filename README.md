@@ -51,6 +51,7 @@ These panels can be modified using the following nodes:
 - **Rotate Polygon**  
 - **Scale Polygon**  
 - **Translate Polygon**  
+- **Skew Polygon**
 - **Bevel Polygon**  
 - **Offset Polygon Bounds**
 
