@@ -132,7 +132,8 @@ def draw_polygons_contours_line(
     scaled_width = round(stroke_width * upscale)
 
     def draw_func(draw: ImageDraw, points: list):
-        draw.line(points + [points[0]], fill=stroke_color, width=scaled_width, joint="curve")
+        extend_end = max(2, math.ceil(len(points)/4))   # ensure the last corner is properly drawn
+        draw.line(points + points[0:extend_end], fill=stroke_color, width=scaled_width, joint="curve")
 
     return _draw_polygons_contours(draw_func, polys, canvas, upscale)
 
