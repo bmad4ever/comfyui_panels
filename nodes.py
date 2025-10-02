@@ -1261,12 +1261,21 @@ class PolygonToResizedMask:
                 "pad": (["16", "32", "64", "128"], {"default": "64"}),
             },
             "optional": {
-                "image": ("IMAGE",),  # optional image to crop + resize
+                "image": ("IMAGE", {"tooltip":  # optional image to crop + resize
+                    "Optional image to be cropped with respect to the pologon's bounds, "
+                    "then resized and padded similarly to the mask.\n"
+                    "Mainly for editing workflows."}),
             }
         }
 
     RETURN_TYPES = ("MASK", "BBOX", "IMAGE")
-    # RETURN_NAMES = ("mask", "bbox", "image")
+
+    OUTPUT_TOOLTIPS = (
+        "Mask resized and padded.",
+        "The returned mask bounds ignoring the padding.",
+        "If an image is provided, returns a resized padded crop of the image; otherwise returns None.",
+    )
+
     FUNCTION = "func"
     CATEGORY = CATEGORY_PATH
 
