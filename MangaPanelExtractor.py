@@ -316,37 +316,6 @@ class MangaPanelExtractor:
             'area': polygon.area,
             'bounds': bounds
         }
-        """
-        Find an empty corner (white area) to start flood fill.
-        Checks all four corners and returns coordinates of the emptiest one.
-        """
-        h, w = binary_img.shape
-        corners = [
-            (0, 0),  # Top-left
-            (0, w - 1),  # Top-right
-            (h - 1, 0),  # Bottom-left
-            (h - 1, w - 1)  # Bottom-right
-        ]
-
-        best_corner = corners[0]
-        max_white_pixels = 0
-
-        for corner in corners:
-            y, x = corner
-            # Define sample region around corner
-            y_start = max(0, y - corner_size // 2)
-            y_end = min(h, y + corner_size // 2)
-            x_start = max(0, x - corner_size // 2)
-            x_end = min(w, x + corner_size // 2)
-
-            sample_region = binary_img[y_start:y_end, x_start:x_end]
-            white_pixels = np.sum(sample_region == 255)
-
-            if white_pixels > max_white_pixels:
-                max_white_pixels = white_pixels
-                best_corner = corner
-
-        return best_corner
 
     def is_convex(self, contour: np.ndarray) -> bool:
         """
