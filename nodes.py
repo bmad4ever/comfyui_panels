@@ -1418,6 +1418,65 @@ class CropImageByBBox:
         return (cropped,)
 
 
+class RelativeCropImage:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE", {"tooltip": "Cropped image."}),
+                "original_crop": (IO_Types.BBOX, {"tooltip": "Original crop bounding box."}),
+                "target_crop": (IO_Types.BBOX, {"tooltip": "New crop bounding box in the old image's coordinates."}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", )
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+    DESCRIPTION = ("Crop an image which is already a crop from another image, using the prior image's coordinates.\n"
+                   "The node accounts for potential image resizes; "
+                   "the image and original_crop dimensions do not have to match.")
+
+    def func(self, image, original_crop, target_crop):
+        ox1, oy1, ox2, oy2 = original_crop
+        tx1, ty1, tx2, ty2 = target_crop
+
+        # Current image shape
+        B, H, W, C = image.shape
+
+        # Original crop size
+        orig_w = ox2 - ox1
+        orig_h = oy2 - oy1
+
+        if orig_w <= 0 or orig_h <= 0:
+            # invalid original crop
+            return (image,)
+
+        # Scale factors (account for resize after crop)
+        scale_x = W / orig_w
+        scale_y = H / orig_h
+
+        # Map target crop into scaled image coordinates
+        mapped_x1 = round((tx1 - ox1) * scale_x)
+        mapped_y1 = round((ty1 - oy1) * scale_y)
+        mapped_x2 = round((tx2 - ox1) * scale_x)
+        mapped_y2 = round((ty2 - oy1) * scale_y)
+
+        # Clamp to valid bounds
+        x1 = max(0, min(W, mapped_x1))
+        y1 = max(0, min(H, mapped_y1))
+        x2 = max(0, min(W, mapped_x2))
+        y2 = max(0, min(H, mapped_y2))
+
+        # Handle invalid crop (outside bounds or inverted)
+        if x2 <= x1 or y2 <= y1:
+            return (image,)
+
+        # Apply crop to all images in batch
+        cropped = image[:, int(y1):int(y2), int(x1):int(x2), :]
+
+        return (cropped,)
+
+
 class DetectPanelsInImage:
 
     SIMPLIFICATION_METHODS = ["none", "bounding_box", "max_area_combination"]
@@ -1507,7 +1566,7 @@ NODE_CLASS_MAPPINGS = {
     "bmad_RandomPanelLayoutGenerator": RandomPanelLayoutGenerator,
     "bmad_GridPanelLayoutGenerator": GridPanelLayoutGenerator,
     "bmad_MutatePanelLayout": MutatePanelLayout,
-    "bmad_DetectPanelsInImage" : DetectPanelsInImage,
+    "bmad_DetectPanelsInImage": DetectPanelsInImage,
 
     "bmad_PolygonBounds": PolygonBounds,
     "bmad_PolygonUnwrappedBounds": PolygonUnwrappedBounds,
@@ -1517,6 +1576,7 @@ NODE_CLASS_MAPPINGS = {
     "bmad_CropMaskByBBox": CropMaskByBBox,
 
     "bmad_CropImageByBBox": CropImageByBBox,
+    "bmad_RelativeCropImage": RelativeCropImage,
 
     "bmad_SliceList_Panels": SliceListPanel,
     "bmad_ListTransferPanel": ListTransferPanel,
@@ -1569,6 +1629,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_CropMaskByBBox": "Crop Mask By BBox",
 
     "bmad_CropImageByBBox": "Crop Image By BBox",
+    "bmad_RelativeCropImage": "Image Relative Crop",
 
     "bmad_SliceList_Panels": "Slice Panels List",
     "bmad_ListTransferPanel": "List Transfer Panels",
