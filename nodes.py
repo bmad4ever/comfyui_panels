@@ -4,7 +4,6 @@ from PIL.PngImagePlugin import PngInfo
 import torch.nn.functional as F
 from copy import deepcopy
 import numpy as np
-import random
 import torch
 import json
 import os
@@ -16,6 +15,7 @@ import folder_paths
 import node_helpers
 
 from .MangaPanelExtractor import MangaPanelExtractor
+from .grow_panel import grow_4sided_polygon
 from .CutNode import *
 from .aux_data import *
 from .draw_funcs import draw_polygons_contours_line, draw_polygons_contours_dashed, draw_polygons_contours_dotted
@@ -627,7 +627,7 @@ class OffsetPolygonBounds:
             },
             "optional": {
                 "bbox_snap": (IO_Types.BBOX_SNAP, {"tooltip":
-                                                       "Constrain the adjustment operation with respect to a bounding box"})
+                    "Constrain the adjustment operation with respect to a bounding box"})
             }
         }
 
@@ -903,6 +903,31 @@ class PolygonOriginVertex(PolygonOrigin):
 
     def func(self, idx):
         return (idx,)
+
+
+class GrowPanel:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "polygon": (IO_Types.PANEL,),
+                "cardinals": ("STRING", {"default": "N", "tooltip":
+    "A combination of the letters N, S, E, and W, indicating in which cardinal directions the shape will grow."}),
+                "along_normal": ("BOOLEAN", {"default": False, "tooltip":
+    "If True, move along edge normal; if False, move along cardinal direction."}),
+                "distance": ("FLOAT", {"default": 256, "min": 1, "max": 2048, "step": .5}),
+            },
+        }
+
+    RETURN_TYPES = (IO_Types.PANEL,)
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    def func(self, polygon, cardinals: str, along_normal, distance):
+        cardinals = cardinals.upper()
+        cardinals = [c for c in ['N', 'S', 'E', 'W'] if c in cardinals]
+        new_polygon = grow_4sided_polygon(polygon, cardinals, along_normal, distance)
+        return (new_polygon, )
 
 # endregion  Polygon Operations
 
@@ -1556,6 +1581,7 @@ NODE_CLASS_MAPPINGS = {
     "bmad_TranslatePolygon": TranslatePolygon,
     "bmad_BevelPolygon": BevelPolygon,
     "bmad_SkewPolygon": SkewPolygon,
+    "bmad_GrowPanel": GrowPanel,
 
     "bmad_PolygonOriginVector": PolygonOriginVector,
     "bmad_PolygonOriginCenter": PolygonOriginCenter,
@@ -1609,6 +1635,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_TranslatePolygon": "Translate Polygon",
     "bmad_BevelPolygon": "Bevel Polygon",
     "bmad_SkewPolygon": "Skew Polygon",
+    "bmad_GrowPanel": "Grow Panel",
 
     "bmad_PolygonOriginVector": "Polygon Origin at Point",
     "bmad_PolygonOriginCenter": "Polygon Origin at Center",

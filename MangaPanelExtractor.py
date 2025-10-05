@@ -3,7 +3,6 @@ import itertools
 import cv2
 import numpy as np
 from typing import List, Tuple, Dict
-import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
 from shapely.validation import make_valid
 
