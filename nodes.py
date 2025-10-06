@@ -368,6 +368,45 @@ class PreviewPanels:
         })
         return {"ui": {"images": results}}
 
+
+class PolygonToMask:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "polygon": (IO_Types.PANEL,),
+            },
+            "optional": {
+                "bbox_window": (IO_Types.BBOX,),
+            }
+        }
+
+    RETURN_TYPES = ("MASK",)
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    def func(self, polygon, bbox_window=None):
+        if bbox_window is None:
+            bbox_window = polygon.bounds
+
+        min_x, min_y, max_x, max_y = bbox_window
+        width = int(np.ceil(max_x - min_x))
+        height = int(np.ceil(max_y - min_y))
+
+        if width <= 0 or height <= 0:
+            raise ValueError("Invalid bbox dimensions")
+
+        mask_img = Image.new("L", (width, height), 0)
+        draw = ImageDraw.Draw(mask_img)
+
+        # shift polygon coordinates into bbox-relative space
+        coords = [(x - min_x, y - min_y) for x, y in np.array(polygon.exterior.coords)]
+        draw.polygon(coords, fill=255)
+
+        mask_np = np.array(mask_img, dtype=np.float32) / 255.0
+        mask_tensor = torch.from_numpy(mask_np)[None, :, :]  # [1, H, W]
+        return (mask_tensor,)
+
 # endregion Core Nodes
 
 # region Layout Generators
@@ -915,7 +954,7 @@ class GrowPanel:
     "A combination of the letters N, S, E, and W, indicating in which cardinal directions the shape will grow."}),
                 "along_normal": ("BOOLEAN", {"default": False, "tooltip":
     "If True, move along edge normal; if False, move along cardinal direction."}),
-                "distance": ("FLOAT", {"default": 256, "min": 1, "max": 2048, "step": .5}),
+                "distance": ("FLOAT", {"default": 256, "min": -512, "max": 2048, "step": .5}),
             },
         }
 
@@ -1293,12 +1332,13 @@ class PolygonToResizedMask:
             }
         }
 
-    RETURN_TYPES = ("MASK", "BBOX", "IMAGE")
+    RETURN_TYPES = ("MASK", "BBOX", "IMAGE", "FLOAT")
 
     OUTPUT_TOOLTIPS = (
         "Mask resized and padded.",
         "The returned mask bounds ignoring the padding.",
         "If an image is provided, returns a resized padded crop of the image; otherwise returns None.",
+        "The scale applied to the polygon in order to obtain the mask at the target resolution."
     )
 
     FUNCTION = "func"
@@ -1382,7 +1422,7 @@ class PolygonToResizedMask:
         else:
             bbox = (0.0, 0.0, 0.0, 0.0)
 
-        return (mask_padded, bbox, img_out)
+        return (mask_padded, bbox, img_out, scale, )
 
 
 class UnpackBBox:
@@ -1556,6 +1596,47 @@ class DetectPanelsInImage:
         panels = [panel["polygon"] for panel in results["panels"]]
         return (panels,)
 
+
+class InvertCardinals:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "cardinals": ("STRING", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", )
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    def func(self, directions: str):
+        opposites = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+        inverted = ''.join(opposites.get(ch, ch) for ch in directions)
+        return (inverted, )
+
+
+class ComplementaryCardinals:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "cardinals": ("STRING", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", )
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    def func(self, cardinals: str):
+        """Return a string with all cardinal directions *not* present in the input."""
+        all_cardinals = {'N', 'S', 'E', 'W'}
+        present = set(cardinals.upper())
+        missing = all_cardinals - present
+        complement = ''.join(sorted(missing, key="NSEW".index))
+        return (complement, )
+
 # endregion Other Nodes
 
 
@@ -1582,6 +1663,8 @@ NODE_CLASS_MAPPINGS = {
     "bmad_BevelPolygon": BevelPolygon,
     "bmad_SkewPolygon": SkewPolygon,
     "bmad_GrowPanel": GrowPanel,
+    "bmad_InvertCardinals": InvertCardinals,
+    "bmad_ComplementaryCardinals": ComplementaryCardinals,
 
     "bmad_PolygonOriginVector": PolygonOriginVector,
     "bmad_PolygonOriginCenter": PolygonOriginCenter,
@@ -1609,6 +1692,7 @@ NODE_CLASS_MAPPINGS = {
     "bmad_ListAppendPanel": ListAppendPanel,
 
     "bmad_PolygonToResizedMask": PolygonToResizedMask,
+    "bmad_PolygonToMask": PolygonToMask,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -1636,6 +1720,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_BevelPolygon": "Bevel Polygon",
     "bmad_SkewPolygon": "Skew Polygon",
     "bmad_GrowPanel": "Grow Panel",
+    "bmad_InvertCardinals": "Invert Cardinals (Grow Panel)",
+    "bmad_ComplementaryCardinals": "Complementary Cardinals (Grow Panel)",
 
     "bmad_PolygonOriginVector": "Polygon Origin at Point",
     "bmad_PolygonOriginCenter": "Polygon Origin at Center",
@@ -1663,4 +1749,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_ListAppendPanel": "List Append Panels",
 
     "bmad_PolygonToResizedMask": "Polygon To Resized Mask",
+    "bmad_PolygonToMask": "Polygon To Mask",
 }
