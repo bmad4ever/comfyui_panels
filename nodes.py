@@ -1264,7 +1264,7 @@ class PasteCrops:
                 "base_image": ("IMAGE",),       # (1, H, W, C), float32 [0,1]
                 "cropped_images": ("IMAGE",),   # list of crops (1, h, w, C)
                 "masks": ("MASK",),             # list of masks (1, h, w) or (1, h, w, 1)
-                "bboxes": ("BBOX",),            # list of (x0, y0, x1, y1)
+                "bboxes": (IO_Types.BBOX,),     # list of (x0, y0, x1, y1)
             }
         }
 
@@ -1332,7 +1332,8 @@ class PolygonToResizedMask:
             }
         }
 
-    RETURN_TYPES = ("MASK", "BBOX", "IMAGE", "FLOAT")
+    RETURN_TYPES = ("MASK", IO_Types.BBOX, "IMAGE", "FLOAT")
+    RETURN_NAMES = ("mask", "bbox", "image", "scale")
 
     OUTPUT_TOOLTIPS = (
         "Mask resized and padded.",
