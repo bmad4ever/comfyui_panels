@@ -42,7 +42,7 @@ def grow_4sided_polygon(
     coords = np.array(polygon.exterior.coords[:-1], dtype=np.float32)
     n_points = len(coords)
 
-    # Cluster vertices into 4 groups (corners) using OpenCV kmeans
+    # Cluster vertices into 4 groups (corners) using kmeans
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
     _, labels, cluster_centers = cv2.kmeans(
         coords,
@@ -114,8 +114,11 @@ def grow_4sided_polygon(
             else:
                 move_vector = cardinal_vec * distance
 
-            # Move the vertices of this edge
-            for idx in best_edge['edge']['indices']:
+            # Move all vertices in the two clusters that form this edge
+            cluster1, cluster2 = best_edge['edge']['cluster_pair']
+            indices_to_move = np.where((labels == cluster1) | (labels == cluster2))[0]
+
+            for idx in indices_to_move:
                 new_coords[idx] += move_vector
 
     # Create new polygon (close the loop by adding first point at end)
