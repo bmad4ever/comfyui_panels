@@ -3,7 +3,7 @@
 This packages contains nodes for generating and-or organizing comics-manga like panels, such as the ones below (_images have the workflow embedded_).
 
 <span>
-<img src="./workflows/Barebones Board Generation.png" alt="drawing" style="width:225px;"/>
+<img src="./workflows/QwenEdit2090 AND Panel with Bleedout Subgraph.png" alt="drawing" style="width:225px;"/>
 <img src="./workflows/Character Over Panels.png" alt="drawing" style="width:225px;"/>
 <img src="./workflows/Panels Over Image.png" alt="drawing" style="width:225px;"/>
 </span>
