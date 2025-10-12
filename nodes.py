@@ -1638,7 +1638,119 @@ class ComplementaryCardinals:
         complement = ''.join(sorted(missing, key="NSEW".index))
         return (complement, )
 
+
+class CropMaskHolesQuantizedPadded:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "mask": ("MASK",),
+                "align_multiple": ("INT", {
+                    "default": 16,
+                    "min": 1,
+                    "max": 512,
+                    "step": 1
+                }),
+            },
+            "optional": {
+                "image": ("IMAGE",),
+            },
+        }
+
+    RETURN_TYPES = ("MASK", "IMAGE", IO_Types.BBOX)
+    OUTPUT_IS_LIST = (True, True, True)
+    RETURN_NAMES = ("cropped_masks", "cropped_images", "crop_boxes")
+    FUNCTION = "func"
+    CATEGORY = CATEGORY_PATH
+
+    DESCRIPTION = """
+    Crop all holes (background regions) in a binary mask and corresponding areas in an optional image.
+    Ensures each crop’s dimensions are multiples of a user-specified alignment value.
+    If expansion exceeds image bounds, pads using edge replication (OpenCV BORDER_REPLICATE style).
+    """
+
+    @staticmethod
+    def _align_box(x, y, w, h, multiple, W, H):
+        new_w = ((w + multiple - 1) // multiple) * multiple
+        new_h = ((h + multiple - 1) // multiple) * multiple
+        # center expansion
+        x0 = max(0, x - (new_w - w) // 2)
+        y0 = max(0, y - (new_h - h) // 2)
+        x1 = min(W, x0 + new_w)
+        y1 = min(H, y0 + new_h)
+        return x0, y0, x1, y1
+
+    @staticmethod
+    def _replicate_pad(tensor, pad_left, pad_right, pad_top, pad_bottom):
+        """Pads tensor using edge replication."""
+        if pad_left or pad_right or pad_top or pad_bottom:
+            # F.pad expects pad in reverse order: (left, right, top, bottom)
+            tensor = F.pad(tensor, (pad_left, pad_right, pad_top, pad_bottom), mode="replicate")
+        return tensor
+
+    def func(
+        self, mask: torch.Tensor, align_multiple: int, image: Optional[torch.Tensor] = None
+    ) -> tuple[list[torch.Tensor], list[torch.Tensor], list[tuple[int, int, int, int]]]:
+
+        # ___ safeguard & compatibility _______
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)
+
+        if image is not None:
+            if mask.shape[-2:] != image.shape[-3:][:-1]:
+                raise ValueError(
+                    f"[CropMaskHoles] Mask and image size mismatch:"
+                    f" mask={mask.shape[-2:]}, image={image.shape[-3:][:-1]}"
+                )
+
+        # ___ the actual function _____________
+        import cv2
+
+        mask_bin = (mask[0] > 0).cpu().numpy().astype(np.uint8)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_bin, connectivity=8)
+
+        H, W = mask.shape[-2:]
+        crops_mask, crops_img, crop_boxes = [], [], []
+
+        for i in range(1, num_labels):  # skip label 0 = background
+            x, y, w, h, area = stats[i]
+            x0, y0, x1, y1 = self._align_box(x, y, w, h, align_multiple, W, H)
+
+            # compute padding if out of bounds
+            pad_left = max(0, -x0)
+            pad_top = max(0, -y0)
+            pad_right = max(0, x1 - W)
+            pad_bottom = max(0, y1 - H)
+
+            # clamp crop region to image bounds
+            cx0 = max(0, x0)
+            cy0 = max(0, y0)
+            cx1 = min(W, x1)
+            cy1 = min(H, y1)
+
+            component_mask = (labels == i).astype(np.uint8)
+            cropped_mask = component_mask[cy0:cy1, cx0:cx1]
+            cropped_mask = torch.from_numpy(cropped_mask).unsqueeze(0).to(mask)
+            cropped_mask = self._replicate_pad(cropped_mask, pad_left, pad_right, pad_top, pad_bottom)
+            crops_mask.append(cropped_mask)
+
+            crop_boxes.append((x0, y0, x1, y1))  # original-space coordinates
+
+            if image is not None:
+                if image.dim() == 3:
+                    cropped_image = image[cy0:cy1, cx0:cx1, :]
+                else:
+                    cropped_image = image[:, cy0:cy1, cx0:cx1, :]
+                cropped_image = self._replicate_pad(cropped_image, pad_left, pad_right, pad_top, pad_bottom)
+                crops_img.append(cropped_image)
+
+        return (crops_mask, crops_img, crop_boxes, )
+
 # endregion Other Nodes
+
+
+
+
 
 
 NODE_CLASS_MAPPINGS = {
@@ -1694,6 +1806,7 @@ NODE_CLASS_MAPPINGS = {
 
     "bmad_PolygonToResizedMask": PolygonToResizedMask,
     "bmad_PolygonToMask": PolygonToMask,
+    "bmad_CropMaskHolesQuantizedPadded": CropMaskHolesQuantizedPadded,
 }
 
 # A dictionary that contains the friendly/humanly readable titles for the nodes
@@ -1751,4 +1864,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 
     "bmad_PolygonToResizedMask": "Polygon To Resized Mask",
     "bmad_PolygonToMask": "Polygon To Mask",
+    "bmad_CropMaskHolesQuantizedPadded": "Crop Mask Holes"
 }
