@@ -2,7 +2,6 @@ import itertools
 
 import cv2
 import numpy as np
-from typing import List, Tuple, Dict
 from shapely.geometry import Polygon
 from shapely.validation import make_valid
 
@@ -25,7 +24,7 @@ class MangaPanelExtractor:
         self.max_vertices = max_vertices
         self.min_panel_area = None  # Will be computed from image size
 
-    def find_empty_corner(self, binary_img: np.ndarray, corner_size: int = 50) -> Tuple[int, int]:
+    def find_empty_corner(self, binary_img: np.ndarray, corner_size: int = 50) -> tuple[int, int]:
         """
         Find an empty corner (white area) to start flood fill.
         Checks all four corners and returns coordinates of the emptiest one.
@@ -58,7 +57,7 @@ class MangaPanelExtractor:
 
         return best_corner
 
-    def expand_image(self, img: np.ndarray, pixels: int) -> Tuple[np.ndarray, Tuple[int, int]]:
+    def expand_image(self, img: np.ndarray, pixels: int) -> tuple[np.ndarray, tuple[int, int]]:
         """
         Expand image by adding white border around it.
 
@@ -104,7 +103,7 @@ class MangaPanelExtractor:
 
         return simplified
 
-    def contour_to_shapely_polygon(self, contour: np.ndarray, offset: Tuple[int, int] = (0, 0)) -> Polygon:
+    def contour_to_shapely_polygon(self, contour: np.ndarray, offset: tuple[int, int] = (0, 0)) -> Polygon:
         """
         Convert OpenCV contour to Shapely polygon, adjusting for image expansion offset.
         """
@@ -150,7 +149,7 @@ class MangaPanelExtractor:
 
         return angle_deg
 
-    def score_vertex_for_removal(self, contour: np.ndarray, vertex_idx: int) -> Tuple[float, float]:
+    def score_vertex_for_removal(self, contour: np.ndarray, vertex_idx: int) -> tuple[float, float]:
         """
         Score a vertex for removal based on internal angle and area gain.
 
@@ -236,7 +235,7 @@ class MangaPanelExtractor:
 
         return current_contour
 
-    def analyze_nonconvex_recovery(self, results: Dict) -> Dict:
+    def analyze_nonconvex_recovery(self, results: dict) -> dict:
         """
         Attempt to recover panels from non-convex shapes using vertex removal.
 
@@ -285,7 +284,7 @@ class MangaPanelExtractor:
 
         return results
 
-    def analyze_panel_shape(self, polygon: Polygon) -> Dict:
+    def analyze_panel_shape(self, polygon: Polygon) -> dict:
         """
         Analyze the shape characteristics of a panel polygon.
         """
@@ -331,7 +330,7 @@ class MangaPanelExtractor:
         convexity_ratio = contour_area / hull_area
         return convexity_ratio > 0.85  # Allow some tolerance
 
-    def extract_panels(self, img: np.ndarray) -> Dict:
+    def extract_panels(self, img: np.ndarray) -> dict:
         """
         Extract panels from manga page using refined flood fill approach.
 
@@ -435,7 +434,7 @@ class MangaPanelExtractor:
 
     # optional user "enforced" panel shape related funcs
 
-    def simplify_panels(self, results: Dict, method: str) -> Dict:
+    def simplify_panels(self, results: dict, method: str) -> dict:
         for i, r in enumerate(results["panels"]):
             results["panels"][i]["polygon"] = \
                 MangaPanelExtractor.simplify_polygon_to_rectangle(results["panels"][i]["polygon"], method)
@@ -478,7 +477,7 @@ class MangaPanelExtractor:
 
         # For very large polygons, use a heuristic approach to avoid combinatorial explosion
         if n_vertices > 12:
-            return MangaPanelExtractor._simplify_large_polygon_max_area_heuristic(coords)
+            return MangaPanelExtractor._simplify_large_polygon_heuristic(coords)
 
         # Try all combinations of 4 vertices from the original polygon
         max_area = 0
@@ -513,7 +512,7 @@ class MangaPanelExtractor:
         return Polygon(best_combination)
 
     @staticmethod
-    def _order_vertices_properly(vertices: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    def _order_vertices_properly(vertices: list[tuple[float, float]]) -> list[tuple[float, float]]:
         """
         Order vertices in proper sequence (clockwise or counter-clockwise) for a valid polygon.
         """
@@ -546,7 +545,7 @@ class MangaPanelExtractor:
         return Polygon(rectangle_coords)
 
     @staticmethod
-    def _simplify_large_polygon_heuristic(coords: List[Tuple[float, float]], original_area: float) -> Polygon:
+    def _simplify_large_polygon_heuristic(coords: list[tuple[float, float]]) -> Polygon:
         """
         Heuristic approach for polygons with high vertex count (>12).
         Selects vertices that are most important for maintaining shape.
