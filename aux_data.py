@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from shapely.geometry import Polygon
-from typing import Tuple
 
 
 @dataclass
@@ -12,7 +11,7 @@ class BBoxSnap:
     snap_on_bbox: bool = True
 
     @classmethod
-    def from_bounds(cls, bounds: Tuple[float, float, float, float], snap_on_bbox: bool = True) -> "BBoxSnap":
+    def from_bounds(cls, bounds: tuple[float, float, float, float], snap_on_bbox: bool = True) -> "BBoxSnap":
         """Create from (xmin, ymin, xmax, ymax)."""
         return cls(*bounds, snap_on_bbox)
 
