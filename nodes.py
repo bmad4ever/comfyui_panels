@@ -1598,6 +1598,89 @@ class DetectPanelsInImage:
         return (panels,)
 
 
+class SortPanels:
+
+    CENTER_FUNCS = {
+        "TOP-LEFT": lambda bxmin, bymin, bxmax, bymax: (bxmin, bymin),
+        "CENTER": lambda bxmin, bymin, bxmax, bymax: ( (bxmin + bxmax)/2, (bymin + bymax)/2 ),
+        "BOTTOM-RIGHT": lambda bxmin, bymin, bxmax, bymax: (bxmax, bymax),
+    }
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "panels": (IO_Types.PANEL,),
+                "left2right": ("BOOLEAN", {"default": True}),
+                "center": (list(cls.CENTER_FUNCS.keys()), {"default": "TOP-LEFT",
+                                                           "tooltip": "point used for sorting."})
+            }
+        }
+
+    INPUT_IS_LIST = True
+    CATEGORY = CATEGORY_PATH
+    RETURN_TYPES = (IO_Types.PANEL,)
+    OUTPUT_IS_LIST = (True,)
+    OUTPUT_TOOLTIPS = ("Panels (Shapely Polygons)",)
+    FUNCTION = "exec"
+    DESCRIPTION = """
+    Simple algo that attempts to sort panels by reading order according to 
+    their bounds center coordinates in quantized space.
+    """
+
+    def exec(self, panels, left2right, center):
+        if not panels:
+            return ([],)
+
+        if isinstance(left2right, list):
+            left2right = left2right[0]
+
+        if isinstance(center, list):
+            center = center[0]
+
+        # find global bounding box
+        minx = min(p.bounds[0] for p in panels)
+        miny = min(p.bounds[1] for p in panels)
+        maxx = max(p.bounds[2] for p in panels)
+        maxy = max(p.bounds[3] for p in panels)
+
+        n = len(panels)
+        grid_size = n  # number of grid cells in one dimension
+        # if there is a bias towards columns or rows only, then non-quantized coordinates should suffice
+        # thus is better to have a somewhat small n, under the supposition the "grid like" layout is balanced
+
+        # quantize space
+        # compute grid cell dimensions
+        cell_w = (maxx - minx) / grid_size if maxx != minx else 1.0
+        cell_h = (maxy - miny) / grid_size if maxy != miny else 1.0
+
+        # assign each polygon to a grid cell
+        poly_cells = []
+        center_func = self.CENTER_FUNCS[center]
+        for i, p in enumerate(panels):
+            x, y = center_func(*p.bounds)
+
+            # compute grid indices (col, row)
+            col = int((x - minx) // cell_w)
+            row = int((maxy - y) // cell_h)  # top-to-bottom order
+
+            # clamp indices
+            col = max(0, min(grid_size - 1, col))
+            row = max(0, min(grid_size - 1, row))
+
+            poly_cells.append((row, col, y, x, i, p))
+
+        # sort by row, then by column (reading order)
+        if left2right:
+            poly_cells.sort(key=lambda t: (-t[0], t[1], t[2], t[3]))  # row, col, x, y(desc)
+        else:
+            poly_cells.sort(key=lambda t: (-t[0], -t[1], t[2], -t[3]))  # reverse col order
+
+        # extract sorted polygons
+        sorted_polygons = [t[-1] for t in poly_cells]
+        return (sorted_polygons,)
+
+
 class InvertCardinals:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1789,6 +1872,7 @@ NODE_CLASS_MAPPINGS = {
     "bmad_GridPanelLayoutGenerator": GridPanelLayoutGenerator,
     "bmad_MutatePanelLayout": MutatePanelLayout,
     "bmad_DetectPanelsInImage": DetectPanelsInImage,
+    "bmad_SortPanels": SortPanels,
 
     "bmad_PolygonBounds": PolygonBounds,
     "bmad_PolygonUnwrappedBounds": PolygonUnwrappedBounds,
@@ -1847,6 +1931,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "bmad_GridPanelLayoutGenerator": "Grid Panel Layout Generator",
     "bmad_MutatePanelLayout": "Mutate Panel Layout",
     "bmad_DetectPanelsInImage": "Detect Panels In Image",
+    "bmad_SortPanels": "Sort Panels",
 
     "bmad_PolygonBounds": "Polygon.bounds",
     "bmad_PolygonUnwrappedBounds": "Polygon.bounds (unwrapped)",
