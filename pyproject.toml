@@ -1,9 +1,12 @@
 [project]
 name = "comfyui_panels"
 description = "Comics/Manga like panel layouts."
-version = "1.1.4"
-license = { file = "LICENSE" }
-dependencies = ["shapely==2.1.1", "matplotlib==3.10.6", "opencv-python~=4.8.1.78"]
+version = "1.1.5"
+license = "MIT"
+dependencies = ["shapely==2.1.1", "matplotlib==3.10.6", "opencv-python>=4.13"]
+
+[tool.setuptools]
+packages = []
 
 [project.urls]
 Repository = "https://github.com/bmad4ever/comfyui_panels"
